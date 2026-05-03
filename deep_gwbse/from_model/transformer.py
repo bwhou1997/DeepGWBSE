@@ -12,6 +12,8 @@ from .model_util import print_model_size, timeCudaWatch
 from .posemb import PositionalEmbeddings_band_energy_kpt
 from .basisassembly import PassBasisAssembly, ElectronHoleBasisAssembly_Concatenate, ElectronHoleBasisAssembly_TensorProduct
 from .model_util import capture_config
+from typing import Optional, List
+import copy
 
 class NoAttentionEncoder(nn.Module):
     def __init__(self, d_model):
@@ -24,6 +26,58 @@ class NoAttentionEncoder(nn.Module):
         query = self.activation(query)
         return query
     
+
+class TransformerEncoderLayerWithWeights(nn.TransformerEncoderLayer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.last_attn_weights = None
+
+    def _sa_block(
+        self,
+        x: Tensor,
+        attn_mask: Optional[Tensor],
+        key_padding_mask: Optional[Tensor],
+        is_causal: bool = False,
+    ) -> Tensor:
+        out, weights = self.self_attn(
+            x,
+            x,
+            x,
+            attn_mask=attn_mask,
+            key_padding_mask=key_padding_mask,
+            need_weights=True,
+            average_attn_weights=False,  # keeps per-head weights
+            is_causal=is_causal,
+        )
+        self.last_attn_weights = weights.detach()
+        return self.dropout1(out)
+
+class TransformerEncoderWithWeights(nn.Module):
+    def __init__(self, encoder_layer, num_layers: int, collect_layers: int = 3):
+        super().__init__()
+        self.layers = nn.ModuleList(
+            [copy.deepcopy(encoder_layer) for _ in range(num_layers)]
+        )
+        self.collect_layers = collect_layers
+
+    def forward(self, src, src_key_padding_mask=None, mask=None):
+        output = src
+        attn_weights = []
+
+        for i, layer in enumerate(self.layers):
+            output = layer(
+                output,
+                src_mask=mask,
+                src_key_padding_mask=src_key_padding_mask,
+            )
+
+            if i < self.collect_layers:
+                attn_weights.append(layer.last_attn_weights)
+
+        return output, attn_weights
+
+
+
 class MBformerEncoder(nn.Module):
     # @capture_config
     def __init__(self, d_input: int = 24, d_output: int = 1, d_model: int = 576, 
@@ -67,9 +121,27 @@ class MBformerEncoder(nn.Module):
 
         # Transformer-Encoder
         if self.use_attention:
-            self.encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout, bias=bias,
-                                                    activation=activation, layer_norm_eps=layer_norm_eps, batch_first=True, norm_first=norm_first)
-            self.encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_encoder_layers)
+            # self.encoder_layer = nn.TransformerEncoderLayer(d_model=d_model, nhead=nhead, dim_feedforward=dim_feedforward, dropout=dropout, bias=bias,
+            #                                         activation=activation, layer_norm_eps=layer_norm_eps, batch_first=True, norm_first=norm_first)
+            # self.encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=num_encoder_layers)
+            self.encoder_layer = TransformerEncoderLayerWithWeights(
+                d_model=d_model,
+                nhead=nhead,
+                dim_feedforward=dim_feedforward,
+                dropout=dropout,
+                bias=bias,
+                activation=activation,
+                layer_norm_eps=layer_norm_eps,
+                batch_first=True,
+                norm_first=norm_first,
+            )
+
+            self.encoder = TransformerEncoderWithWeights(
+                self.encoder_layer,
+                num_layers=num_encoder_layers,
+                collect_layers=3,
+            )
+
         else:
             self.encoder_layer = NoAttentionEncoder(d_model=d_model)
             # stack multiple NoAttentionEncoder layers
@@ -101,15 +173,33 @@ class MBformerEncoder(nn.Module):
         return self.BasisAssembly(*x_emb)
 
     @timeCudaWatch
-    def encode(self, x_emb: Tensor,src_mask) -> Tensor:
+    # def encode(self, x_emb: Tensor,src_mask) -> Tensor:
+    #     x_emb = x_emb.view(x_emb.shape[0], -1, x_emb.shape[-1])
+    #     if src_mask is not None:
+    #         src_key_padding = (~src_mask).view(x_emb.shape[0], -1)
+    #         x_emb = self.encoder(x_emb, src_key_padding_mask=src_key_padding)
+    #     else:
+    #         x_emb = self.encoder(x_emb)
+    #     return x_emb
+    def encode(self, x_emb: Tensor, src_mask=None):
         x_emb = x_emb.view(x_emb.shape[0], -1, x_emb.shape[-1])
+
+        if not self.use_attention:
+            return self.encoder(x_emb), []
+
         if src_mask is not None:
             src_key_padding = (~src_mask).view(x_emb.shape[0], -1)
-            x_emb = self.encoder(x_emb, src_key_padding_mask=src_key_padding)
+            x_emb, layer_attentions = self.encoder(
+                x_emb,
+                src_key_padding_mask=src_key_padding,
+            )
         else:
-            x_emb = self.encoder(x_emb)
-        return x_emb
-    
+            x_emb, layer_attentions = self.encoder(x_emb)
+
+        return x_emb, layer_attentions
+
+
+
     @timeCudaWatch
     def calculate_attention(self, y: Tensor) -> Tensor:
         return self.final_attention(y, y, y)
@@ -118,7 +208,7 @@ class MBformerEncoder(nn.Module):
     def apply_final_linear(self, y: Tensor) -> Tensor:
         return self.fc(y)
 
-    def forward(self, src_datas: list[list[Tensor, Tensor, Tensor, Tensor]], src_mask = None) -> torch.Tensor:
+    def forward(self, src_datas: list[list[Tensor, Tensor, Tensor, Tensor]], src_mask = None, return_layer_attentions: bool = False) -> torch.Tensor:
 
         """
         Input:
@@ -144,7 +234,9 @@ class MBformerEncoder(nn.Module):
         x_emb = self.assemble_basis(x_emb) # -> Tensor, (batch, nk, (nb1, nb2..)., d_model)
         
         # Encode src
-        y = self.encode(x_emb, src_mask) # -> Tensor, (batch, nk*nb1*nb2.., d_model)
+        # y = self.encode(x_emb, src_mask) # -> Tensor, (batch, nk*nb1*nb2.., d_model)
+        y, layer_attentions = self.encode(x_emb, src_mask)
+
 
         # calculate attention and output
         _, attn_weights = self.calculate_attention(y)  # -> Tensor, (batch, nk*nb1*nb2.., nk*nb1*nb2..)
@@ -158,6 +250,9 @@ class MBformerEncoder(nn.Module):
         # reshape y and attn_weights
         y_emb_shape = x_emb.shape[:-1] + (y.shape[-1],)
         attn_weights_shape = attn_weights.shape[0:1] + x_emb.shape[1:-1] + x_emb.shape[1:-1] 
+        # return y.view(*y_emb_shape), attn_weights.view(*attn_weights_shape)
+        if return_layer_attentions:
+            return y.view(*y_emb_shape), attn_weights.view(*attn_weights_shape), layer_attentions
         return y.view(*y_emb_shape), attn_weights.view(*attn_weights_shape)
     
 class MBformerDecoder(MBformerEncoder):
@@ -292,7 +387,7 @@ class MBformer(nn.Module):
     def summary(self):
         print_model_size(model=self, model_name=self._get_name())
     
-    def forward(self, tgt_datas:list[list[Tensor, Tensor, Tensor, Tensor]], src_datas:list[list[Tensor, Tensor, Tensor, Tensor]], tgt_mask=None, src_mask=None):
+    def forward(self, tgt_datas:list[list[Tensor, Tensor, Tensor, Tensor]], src_datas:list[list[Tensor, Tensor, Tensor, Tensor]], tgt_mask=None, src_mask=None, return_layer_attentions=False):
         """
         Input:
             tgt_datas: [basis_data1, basis_data2, ...], len(tgt_datas) = number of basis (1 or 2) (currently)
@@ -303,6 +398,23 @@ class MBformer(nn.Module):
             y(default): (batch, nk, (nb1, nb2...), d_output)
             attention(default): (batch, (nk, nb1, nb2...), (nk, nb1, nb2...)) 
         """
+        # memory, _ = self.encoder(src_datas, src_mask=src_mask)
+        # output = self.decoder(tgt_datas, memory, tgt_mask=tgt_mask, src_mask=src_mask)
+        # return output
+        if return_layer_attentions:
+            memory, _, layer_attentions = self.encoder(
+                src_datas,
+                src_mask=src_mask,
+                return_layer_attentions=True,
+            )
+            output = self.decoder(
+                tgt_datas,
+                memory,
+                tgt_mask=tgt_mask,
+                src_mask=src_mask,
+            )
+            return output, layer_attentions
+
         memory, _ = self.encoder(src_datas, src_mask=src_mask)
         output = self.decoder(tgt_datas, memory, tgt_mask=tgt_mask, src_mask=src_mask)
         return output
