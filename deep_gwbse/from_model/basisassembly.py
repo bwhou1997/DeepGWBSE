@@ -47,7 +47,7 @@ def b1b2_grid(nb1, nb2):
 
 
 def sort_exciton_eigenvalues_by_eh_pair_energy(ele:list, hole:list, eigenvalues:torch.Tensor, eigenvectors:torch.Tensor=None,
-                                               dipole:torch.Tensor=None) -> tuple:
+                                               dipole:torch.Tensor=None, output_indices:bool=False) -> tuple:
     """
     Sort eigenvalues by eh pair energy
     make sure the shape and energy order of transformer output matches with the exciton eigenvalues
@@ -97,7 +97,10 @@ def sort_exciton_eigenvalues_by_eh_pair_energy(ele:list, hole:list, eigenvalues:
         dipole_sorted_by_eh_pair_energy[eh_pair_energy_indices] = dipole.flatten()
         dipole_sorted_by_eh_pair_energy = dipole_sorted_by_eh_pair_energy.reshape(eh_pair_energy_shape)
 
-    return eigenvalues_sorted_by_eh_pair_energy, eigenvectors_sorted_by_eh_pair_energy, dipole_sorted_by_eh_pair_energy
+    if output_indices:
+        return eigenvalues_sorted_by_eh_pair_energy, eigenvectors_sorted_by_eh_pair_energy, dipole_sorted_by_eh_pair_energy, eh_pair_energy_indices
+    else:
+        return eigenvalues_sorted_by_eh_pair_energy, eigenvectors_sorted_by_eh_pair_energy, dipole_sorted_by_eh_pair_energy
 
 class PassBasisAssembly(nn.Module):
     nbasis = 1
