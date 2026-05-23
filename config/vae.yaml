@@ -1,0 +1,41 @@
+# Please don't delete lines in the script (except for the model section), as no default is defined.
+system:
+  stage: train  # train / test
+  train_dir: ./  # path to save training data
+  ckpt_dir: null  # path to load checkpoints.
+  resume: False  # whether to resume from checkpoint (including optimizer state). If True, load_from_ckpt will be ignored.
+  load_from_ckpt: False  # if True, load from ckpt_dir as init parameters (This is different from resuming: loss, optimizer, etc. will be init from scratch.)
+  precision: 32  # 32 / 64, training precision
+  seed: 42  # random seed, set to null if not fix seed.
+  accelerator: "cpu"  # cpu / gpu
+  num_nodes: 1 # number of nodes for distributed training
+  devices: 2  # number of devices per node (number of tasks per node if using slurm)
+
+dataset:
+  dataset_dir: ./dataset_WFN.h5  # path to dataset h5 file
+  use_3d: False  # if True, z is treated as channel and use 2D CNN, other wise use 3D CNN.
+  dataset_slice: [0, 2, 1]  # [start, end, step]: slice(start, end, step) is used to read dataset.
+  max_batch_size: 80  # max batch size (nk*nb) of one data point, one datapoint will be split into several points.
+  train_stage_split: [0.8, 0.1, 0.1]  # train: val: test, with sum = 1. Only for train stage.
+
+model:
+  net: EquivariantVAE  # only EquivariantVAE / EquivariantVAE3D for now, null to determine automatically.
+  # input_channels: derived from data
+  N_rotation: 12
+  hidden_cnn_channels: [96, 48, 48, 12]
+  hidden_pooling: [-1.00, 0.66, -1.00, 0.66]
+  kernel_size: [5,5,3,3]
+
+optimization:
+  lr: 2.e-3  # initial learning rate
+  lr_decay: 0.5  # factor by which to decay learning rate on plateau
+  lr_patience: 200  # number of epochs with no improvement after which learning rate will be reduced
+  train_patience: 300  # number of epochs without improvement after which training will be stopped
+  monitor: val/total_loss  # metric to monitor for lr decay / global stop
+  min_epochs: 20  # minimum number of epochs to train
+  max_epochs: 1200  # maximum number of epochs to train
+  gradient_clip_val: 1.0  # value for gradient clipping to avoid griadent explosion
+  # loss coeffs, set to null to disable specific loss
+  coeff_mse: 2.0  # coefficient for MSE loss
+  coeff_kl: 0.02  # coefficient for KL divergence loss
+

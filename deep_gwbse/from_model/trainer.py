@@ -8,6 +8,10 @@ from torch.utils.tensorboard import SummaryWriter
 from abc import ABC, abstractmethod
 import copy 
 import json
+import pytorch_lightning as pL
+from torch.utils.data import DataLoader, Subset, Dataset
+
+
 class Trainer(ABC):
     """
     Here we define a generic trainer for Sup- and Unsupervised learning.
@@ -317,7 +321,88 @@ class Trainer(ABC):
             self.verbose_logger.info(f"Eopch {epoch+1} | train. loss {training_loss:.2e} | val. loss {validation_loss:.2e} | val. metrics: {additional_metrics_info}| learning rate: {learning_rate:.2e} | (Best model)")
         else:
             self.verbose_logger.info(f"Eopch {epoch+1} | train. loss {training_loss:.2e} | val. loss {validation_loss:.2e} | val. metrics: {additional_metrics_info}| learning rate: {learning_rate:.2e} |")
-        
+
+
+class TrainDataModule(pL.LightningDataModule):
+    '''
+    This module implements the following functionality:
+    1. Split the dataset into train/val/test or prediction according to `global_stage`.
+    2. Find the indices for the current process in distributed training, this is used to load the relevanet portion of the dataset for each process to avoid duplicate loading.
+    '''
+    def __init__(self, dataset: Dataset, global_stage="train", train_stage_split=[0.8, 0.1, 0.1], collate_fn=None,
+                 batch_size=1, **kwargs):
+        '''
+        Args:
+            dataset: the whole dataset to be prepared.
+            global_stage: "train", "test", or "predict". Dictate how to split the dataset.
+            train_stage_split: only used when global_stage is "train". A list of three numbers indicating the split ratio for train/val/test. Should sum to 1.
+            collate_fn: the collate function for the dataloader.
+            batch_size: the batch size for the dataloader.
+            kwargs: other arguments for dataloader.
+        '''
+        super().__init__()
+        self.dataset = dataset
+        self.global_stage = global_stage  # dictate how to split the dataset
+        self.train_stage_split = train_stage_split
+        self.collate_fn = collate_fn
+        self.batch_size = batch_size
+        self.dataloader_kwargs = kwargs
+    
+    def _split_process(self, length:int) -> list:  # modified from DDPSampler
+        '''length: length (int) of whole dataset. Return indices (list) for this process.'''
+        if torch.distributed.is_initialized():
+            rank = torch.distributed.get_rank()
+            world_size = torch.distributed.get_world_size()
+        else:
+            rank, world_size = 0, 1
+        num_replicas = world_size
+        num_samples = math.ceil(length / num_replicas)  # type: ignore[arg-type]
+        total_size = num_samples * num_replicas
+        indices = list(range(length))  # type: ignore[arg-type]
+        # add extra samples to make it evenly divisible
+        padding_size = total_size - len(indices)
+        if padding_size <= len(indices):
+            indices += indices[:padding_size]
+        else:
+            indices += (indices * math.ceil(padding_size / len(indices)))[:padding_size]
+        assert len(indices) == total_size
+        # subsample
+        # indices = indices[rank : total_size : num_replicas]
+        indices = indices[rank*num_samples: (rank+1)*num_samples]
+        # with open(f"./{rank}.txt", mode="w") as f:
+        # f.write(str(indices)+"\n")
+        return indices
+
+    def setup(self, stage):
+        if self.global_stage.lower() == "train":
+            train, val, test = self.train_stage_split
+            num_train = int(len(self.dataset) * train)
+            num_val = int(len(self.dataset) * val)
+            num_test = int(len(self.dataset) * test)
+            indices = list(range(len(self.dataset)))
+            self.train_dataset = Subset(self.dataset, indices[:num_train])
+            self.val_dataset = Subset(self.dataset, indices[num_train:num_train+num_val])
+            self.test_dataset = Subset(self.dataset, indices[num_train+num_val:num_train+num_val+num_test])
+
+        elif self.global_stage.lower() == "test":  # all used as test set
+            self.test_dataset = self.dataset
+        elif self.global_stage.lower() == "predict":  # all used as predict
+            self.predict_dataset = self.dataset
+        else:
+            raise ValueError(f"Stage {self.global_stage} not supported!")
+    
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, collate_fn=self.collate_fn, shuffle=True, **self.dataloader_kwargs)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, collate_fn=self.collate_fn, shuffle=False, **self.dataloader_kwargs)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, collate_fn=self.collate_fn, shuffle=False, **self.dataloader_kwargs)
+    
+    def predict_dataloader(self):
+        return DataLoader(self.predict_dataset, batch_size=self.batch_size, collate_fn=self.collate_fn, shuffle=False, **self.dataloader_kwargs)
+
 
 
 if __name__ == "__main__":

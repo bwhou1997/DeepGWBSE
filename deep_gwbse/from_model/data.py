@@ -217,6 +217,7 @@ class ManyBodyData(Dataset):
         self.dataset_fname = dataset_fname
         self.onlySave = onlySave
         self.load_large_dataset_inference = kwargs.get('load_large_dataset_inference', False)
+        self.lazy_load = kwargs.pop("lazy_load", False)
         self.kwargs = kwargs
         self.operator = operator
         
@@ -235,7 +236,8 @@ class ManyBodyData(Dataset):
             self.process()
         
         if not self.onlySave:
-            assert self.data is not None, "Data is not loaded or processed"
+            if not self.lazy_load:
+                assert self.data is not None, "Data is not loaded or processed"
         else:
             self.data = []
             print(f"Only saving dataset")
@@ -243,13 +245,22 @@ class ManyBodyData(Dataset):
         self.info.show_info()
 
     def __len__(self):
-        return len(self.data)
+        # return len(self.data)
+        return len(self.info.mat_id)
 
     def __getitem__(self, idx):
-        return self.data[idx]
+        if not self.lazy_load:
+            return self.data[idx]
+        else:
+            return self.datapoint_interface_h5(pjoin(self.dataset_dir, self.dataset_fname), self.info.mat_id[idx], mode='r')
+ 
     
     @classmethod
     def from_existing_dataset(cls, existing_dataset_fname: str, data_slice:slice=None, **kwargs) -> 'ManyBodyData':
+        '''
+        Args:
+            lazy_load: (specify in **kwargs) if True, data will be loaded into RAM only when getitem is called, otherwise, loading will happen immediately.\
+                Default: False. This is used for large dataset that cannot be loaded into memory at once.'''
         assert os.path.exists(existing_dataset_fname), f"{existing_dataset_fname} does not exist"
         dataset_dir, dataset_fname = os.path.dirname(existing_dataset_fname), os.path.basename(existing_dataset_fname)
         print('Loading dataset info')
@@ -290,7 +301,10 @@ class ManyBodyData(Dataset):
 
         self.info.mat_id = self.info.mat_id[data_slice] if data_slice is not None else self.info.mat_id
         print("loading data")
-        self.data = [self.datapoint_interface_h5(pjoin(self.dataset_dir, self.dataset_fname), mat_id, mode='r', load_large_dataset_inference=self.load_large_dataset_inference) for mat_id in self.info.mat_id]
+        if not self.lazy_load:
+            self.data = [self.datapoint_interface_h5(pjoin(self.dataset_dir, self.dataset_fname), mat_id, mode='r', load_large_dataset_inference=self.load_large_dataset_inference) for mat_id in self.info.mat_id]
+        else:
+            self.data = None
 
         # print(f"Loading existing dataset: {os.path.abspath(self.data.filename)}")
 

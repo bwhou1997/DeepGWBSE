@@ -51,6 +51,7 @@ dependencies = [
     "mp-api>=0.45.9",
     "nbformat>=5.10.4",
     "escnn>=1.0.11",
+    "pyyaml",
 ]
 
 # ---------------------------------------------------------------------
@@ -63,6 +64,7 @@ ml = [
     "torchvision",
     "e2cnn",
     "tensorboard",
+    "lightning==2.5.5",
 ]
 
 dev = [
@@ -77,6 +79,7 @@ dev = [
 [project.scripts]
 deep-gwbse-flows = "deep_gwbse.flows:main"
 deep-gwbse-flows-aug = "deep_gwbse.flows_augmentation:main"
+deep-gwbse-vae = "deep_gwbse.vae:real_vae"
 
 # ---------------------------------------------------------------------
 # Packaging

@@ -409,6 +409,10 @@ def vae_loss(recon_x, x, mu, logvar, beta=0.02):
     return recon_loss + kl_loss
 
 
+def kl_loss_mean(mu, logvar):
+    return -torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
+
+
 
 
 
