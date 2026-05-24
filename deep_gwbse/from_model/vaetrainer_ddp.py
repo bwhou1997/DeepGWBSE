@@ -352,8 +352,8 @@ def run_vae(config, init_input_channels:Callable, init_collate:Callable, init_mo
         if config["system"]["devices"] >= 2:
             trainer_params["strategy"] = "ddp"
             trainer_params["use_distributed_sampler"] = False
-        if config["optimization"]["monitor_time"]:
-            trainer_params["profiler"] = "simple"
+        # if config["optimization"]["monitor_time"]:
+            # trainer_params["profiler"] = "simple"
         # callbacks
         callbacks = [
             LearningRateMonitor(),  # log lr

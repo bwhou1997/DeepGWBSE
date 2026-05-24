@@ -94,7 +94,8 @@ class ManyBodyData_WFN_Embedder_pretrained:
         self.latent_embedder = latent_embedder(latent_dim, **kwargs)
         self.del_wfn_original = False
         self.on_cuda = False
-        if hasattr(self.latent_embedder, 'vaetrainer'):
+        if hasattr(self.latent_embedder, 'vaetrainer') or\
+            (hasattr(self.latent_embedder, "on_cuda") and self.latent_embedder.on_cuda):
             self.on_cuda = True
     
     def _embed_wfn(self, wfn_data):
@@ -341,14 +342,14 @@ class OtherEmbedder(LatentEmbedderBASE):
 
 
 class LightningEmbedder_realVAE(LatentEmbedderBASE):
-    def __init__(self, latent_dim, config_dir, ckpt_dir, device="cpu"):
+    def __init__(self, latent_dim, input_channels, config_dir, ckpt_dir, device="cpu"):
+        self.on_cuda = (device in ["cuda", "gpu"])
+        if device == "gpu":
+            device = "cuda"
         self.device=device
-        self.on_cuda = (device=="cuda")
         with open(config_dir, 'r') as f:
             config = yaml.safe_load(f)
-        scaling_factor = np.prod(config["model"]["pooling_factors"])
-        precision = config["system"]["precision"]
-        self.input_channels = init_input_channels_real(config)
+        self.input_channels = input_channels
         self.collate_fn = init_collate_real(config)
         self.vae = init_model_real(config, self.input_channels,)
 
@@ -372,7 +373,7 @@ class LightningEmbedder_realVAE(LatentEmbedderBASE):
         wfn_data = wfn_data.reshape((nk*nb,) + wfn_data.shape[2:])
         wfn_data, mask = self.collate_fn([wfn_data])
         wfn_data = wfn_data.to(self.device)
-        x_recon, mu, logvar = self.model(wfn_data)
+        x_recon, mu, logvar = self.vae(wfn_data)
         
         # GOP layer
         pool_dim = tuple(range(2, len(mu.shape)))

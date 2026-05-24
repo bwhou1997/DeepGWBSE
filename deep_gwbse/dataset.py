@@ -39,6 +39,7 @@ def gen_h5_data():
 
 
 def embed():
+    from deep_gwbse.from_model.vaetrainer_ddp import init_input_channels_real
     '''wfn to latent'''
     parser = argparse.ArgumentParser(description='Embed wavefunction to latent space.')
     parser.add_help = True
@@ -48,7 +49,12 @@ def embed():
         embed_config = yaml.safe_load(f)
 
     manybodydata = ManyBodyData.from_existing_dataset(embed_config["orig_dataset_dir"], lazy_load=embed_config["lazy_load"])
+    # determine input channels
+    with open(embed_config["model_config_dir"], "r") as f:
+        model_config = yaml.safe_load(f)
+    input_channels = init_input_channels_real(model_config, manybodydata)
     embedder = ManyBodyData_WFN_Embedder_pretrained(None, LightningEmbedder_realVAE,
+                                                    input_channels=input_channels,
                                                     config_dir=embed_config["model_config_dir"],
                                                     ckpt_dir=embed_config["ckpt_dir"],
                                                     device=embed_config["device"],
