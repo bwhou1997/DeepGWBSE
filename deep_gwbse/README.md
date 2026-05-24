@@ -189,30 +189,72 @@ see deeph3-train.py for more details.
 ## DDP Training for VAE
 
 ### Usage
+Yaml files are used for inputs. Examples are included in the `config` folder.
+
 1. Data preparation
-Same as original code, but now supports yaml input directly: [not done yet]
+Same as original code, but now supports yaml input directly.
 
 ```bash
-deep-gwbse-data -c data.yaml
+deep-gwbse-gen-h5 -c data.yaml
 ```
 
-2. Run DDP training for VAE
+2. Run DDP training for VAE. On interactive nodes:
 
 ```bash
 srun -G 4 deep-gwbse-vae -c vae.yaml
 ```
 
+To use bash script, a minimal submission script is:
+
+```
+#!/bin/bash
+#SBATCH -C gpu
+#SBATCH -N 1
+#SBATCH --gpus-per-node=4
+#SBATCH --ntasks-per-node=4
+#SBATCH -t 30:00:00
+#SBATCH -o dot.out
+
+# ...environment preparation... (conda activate, etc.)
+
+srun deep-gwbse-vae -c vae.yaml
+```
+Note that `-N` and `--gpus-per-node` should agree with input yaml, and `--ntasks-per-node` should be the same as tpus per node.
+
+See [lightning docs](https://lightning.ai/docs/pytorch/stable/clouds/cluster_advanced.html) for more details.
+
+During training, a directory `lightning_logs/version_X` will be created. It contains an event file for tensorboard monitoring and a checkpoint folders holding the checkpoint best on validation set. The checkpoint file `XXX.ckpt` contains more information than an ordinary model checkpoint. The model check point can be accessed as:
+```python
+ckpt = torch.load(ckpt_dir)
+model_weights = ckpt["state_dict"]
+```
+The `model_weights` contains all the parameters, but all parameter names are prepended by `model.`. To load the checkpoint into a raw model (instead of a lightning module), the name should be modified:
+```python
+vae = EquivariantVAE(...)
+for key in list(model_weights):
+    model_weights[key.replace("model.", "")] = model_weights.pop(key)
+vae.load_state_dict(model_weights)
+```
+Alternatively, one can also load the checkpoint into lightning module directly
+```python
+from deep_gwbse.from_model.vaetrainer_ddp import 
+vae = EquivariantVAE(...)
+vae_lightning = WFNVAETrainModule.load_from_checkpoint(ckpt_dir, model=model, ...other kwargs)
+```
+The module `vae_lightning` can be used as an ordinary `pytorch.nn.Module` such as evaluation `out = vae_lightnign(in)`.
+
+
 3. Wavefunction Embedding & GW Training
-[not done yet]
 ```bash
 deep-gwbse-embed -c embed.yaml
 ```
+The resulting h5 dataset replace wfn data with latent dataa and can be used in GW Training as usual.
 
 ### Developer Notes
 
 This section gives an introduction to all the new codes for Distributed Data Parallel (DDP) training. For more details, please see the documentation of the relavant codes and the documentation of [pytorch_lightning](https://lightning.ai/docs/pytorch/stable/).
 
-The code is designed to be reusable at different levels. They are packed so that and there not need to worry about parallelization explicitly. For a highly customized VAE, a minimal example DDP training script is as follows (run the code with `srun`):
+The code is designed to be reusable at different levels. They are packed so that and there is no need to worry about parallelization explicitly. For a highly customized VAE, a minimal example DDP training script is as follows (run the code with `srun`):
 
 ```python
 import pytorch_lightning as pL
@@ -236,7 +278,7 @@ def wfn_collate_fn(batch):
     pass
 
 # step 2: initialize data
-wfdata = ManyBodyData.from_existing_dataset("./wfndata.h5", lazy_load=True)
+wfdata = ManyBodyData.from_existing_dataset("./wfndata.h5", lazy_load=True)  # this handles all parallelization for data
 
 wfdata_lightning = WFNDataModule(
     base_dataset = wfdata,
@@ -255,7 +297,7 @@ trainer = pL.Trainer(
     num_nodes=1,
     devices=4,  # number of GPU per node
     max_epochs=1000,
-    strategy="ddp",
+    strategy="ddp",  # this handles all parallelization for training
     use_distributed_sampler=False, # MUST be False if use WFNDataModule!!!
 )
 
@@ -275,7 +317,7 @@ Defined in `vaetrainer_ddp.WFNDataModule`.
 
 It supports complex datatypes.
 
-These codes do two things: First, change the logic of the dataset (1 material as a datapoint -> A batch of wavefunctions as a datapoint, i.e., `(nk, nb, ...) -> several (N, ...)`). Second, use Lightning Data Module to prepare the dataloader for each process: The whole dataset will be split into several parts, and each process will only load its own part (This avoids CPU memory issues.). The Lightning Data Module can then be directly provided to lightning trainers.
+This is the main module needed for VAE parallelization. It does two things: First, change the logic of the dataset (1 material as a datapoint -> A batch of wavefunctions as a datapoint, i.e., `(nk, nb, ...) -> several (N, ...)`). Second, use Lightning Data Module to prepare the dataloader for each process: The whole dataset will be split into several parts, and each process will only load its own part (This avoids CPU memory issues.). The Lightning Data Module can then be directly provided to lightning trainers.
 
 In most cases `WFNDataModule` can be directly used. An example is:
 ```python
@@ -349,7 +391,7 @@ class MyModule(pL.LightningModule):
 #### 3. I/O and Training
 This is defined in `vaetrainer_ddp.run_vae`.
 
-This mainly handles user I/O via yaml, initiates the DataModule, the model and the TrainModule, and then perform the training.
+This mainly handles user I/O via yaml, initiates the DataModule, the model and the TrainModule, and then performs the training.
 
 Developers might want to customize this part. A minimal example is as follows. `vaetrainer_ddp` also includes other logics such as resuming, load from checkpoint, etc.
 ```python
@@ -366,7 +408,7 @@ trainer = pL.Trainer(
 trainer.fit(vae_lightning, datamodule=data_lightning)  # data_lightning: instance of WFNDataModule, vae_lightning: instance of LightningModule.
 ```
 
-Note: **If using `WFNDataModule`, `use_distributed_sampler` MUST be set to False in the trainer!!!** This is because `WFNDataModule` implements a distribution logic slightly different from the raw pytorch DDP (here we let each process only load a fixed part of the whole data), and setting `use_distributed_sampler` while using `WFNDataModule` results in undefined data parallelization.
+Note: **If using `WFNDataModule`, `use_distributed_sampler` MUST be set to False in the trainer!!!** This is because `WFNDataModule` already implements a distribution logic slightly different from the raw pytorch DDP (here we let each process only load a fixed part of the whole data), and setting `use_distributed_sampler` while using `WFNDataModule` will split the data twice, resulting in undefined behavior.
 
 If developers wish to directly use the currently implemeted logic, `run_vae` can be directly called. See the comments in `vaetrainer_ddp.run_vae` for details. To use `run_vae`, please only customize the `model` part of the config file.
 

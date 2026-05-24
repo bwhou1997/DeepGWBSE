@@ -79,7 +79,9 @@ dev = [
 [project.scripts]
 deep-gwbse-flows = "deep_gwbse.flows:main"
 deep-gwbse-flows-aug = "deep_gwbse.flows_augmentation:main"
+deep-gwbse-gen-h5 = "deep_gwbse.dataset:gen_h5_data"
 deep-gwbse-vae = "deep_gwbse.vae:real_vae"
+deep-gwbse-embed = "deep_gwbse.dataset:embed"
 
 # ---------------------------------------------------------------------
 # Packaging
