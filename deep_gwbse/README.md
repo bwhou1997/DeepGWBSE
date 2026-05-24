@@ -188,17 +188,19 @@ see deeph3-train.py for more details.
 
 ## DDP Training for VAE
 
+Note that Distributed Data Parallel (DDP) is equivalent to using a larger effective batch size. This is faster as one epoch contains less steps, but it is not necessary good for model performance (e.g., generalization).
+
 ### Usage
 Yaml files are used for inputs. Examples are included in the `config` folder.
 
-1. Data preparation
+1. **Data preparation**
 Same as original code, but now supports yaml input directly.
 
 ```bash
 deep-gwbse-gen-h5 -c data.yaml
 ```
 
-2. Run DDP training for VAE. On interactive nodes:
+2. **Run DDP training for VAE**. On interactive nodes:
 
 ```bash
 srun -G 4 deep-gwbse-vae -c vae.yaml
@@ -219,7 +221,7 @@ To use bash script, a minimal submission script is:
 
 srun deep-gwbse-vae -c vae.yaml
 ```
-Note that `-N` and `--gpus-per-node` should agree with input yaml, and `--ntasks-per-node` should be the same as tpus per node.
+Note that `-N` and `--gpus-per-node` should agree with input yaml, and `--ntasks-per-node` should be the same as gpus per node.
 
 See [lightning docs](https://lightning.ai/docs/pytorch/stable/clouds/cluster_advanced.html) for more details.
 
@@ -244,11 +246,11 @@ vae_lightning = WFNVAETrainModule.load_from_checkpoint(ckpt_dir, model=model, ..
 The module `vae_lightning` can be used as an ordinary `pytorch.nn.Module` such as evaluation `out = vae_lightnign(in)`.
 
 
-3. Wavefunction Embedding & GW Training
+3. **Wavefunction Embedding & GW Training**
 ```bash
 deep-gwbse-embed -c embed.yaml
 ```
-The resulting h5 dataset replace wfn data with latent dataa and can be used in GW Training as usual.
+It reads the original h5 dataset (can be wfn / GW / BSE) and generate a new dataset replacing wavefunctions with latent vectors. The resulting latent h5 dataset can be used in GW Training as usual.
 
 ### Developer Notes
 
@@ -407,7 +409,6 @@ trainer = pL.Trainer(
 )
 trainer.fit(vae_lightning, datamodule=data_lightning)  # data_lightning: instance of WFNDataModule, vae_lightning: instance of LightningModule.
 ```
-
 Note: **If using `WFNDataModule`, `use_distributed_sampler` MUST be set to False in the trainer!!!** This is because `WFNDataModule` already implements a distribution logic slightly different from the raw pytorch DDP (here we let each process only load a fixed part of the whole data), and setting `use_distributed_sampler` while using `WFNDataModule` will split the data twice, resulting in undefined behavior.
 
 If developers wish to directly use the currently implemeted logic, `run_vae` can be directly called. See the comments in `vaetrainer_ddp.run_vae` for details. To use `run_vae`, please only customize the `model` part of the config file.
@@ -435,3 +436,4 @@ It is a pytorch `Dataset` responsible for the logic change `(nk, nb, ...) -> (N_
 2. `vaetrainer.wfn_collate_fn` and `vaetrainer.wfn_collate_fn_3D`: a `batched_data` argument is added to be compatible with `WFNDataModule`. The defualt is compatible with old codes.
 3. Move `torch.backends.cudnn.enabled = False` to the main part of `vaetrainer.py`. This is for 3D convolution only.
 4. A seperate `kl_loss_mean` function is added to `e2vae` for the lightning module to report both mse and KL divergence.
+5. New user interface for `data.py` and `wfnembedder.py`.

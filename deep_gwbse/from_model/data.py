@@ -13,6 +13,8 @@ import logging
 import numpy as np
 import copy
 from deep_gwbse.utils import check_flows_status
+from pytorch_lightning.utilities import rank_zero_info, rank_zero_only
+
 """
 Author:  Bowen Hou
 Contact: bowen.hou@yale.edu
@@ -104,7 +106,8 @@ class DataSetInfo:
 
     def vae_base_set(self, **kwargs):
         pass
-
+    
+    @rank_zero_only
     def show_info(self,):
         print(f"\n======{str(self.dataset_type)} Dataset Info:=======")
         for key, value in self.__dict__.items():
@@ -227,12 +230,12 @@ class ManyBodyData(Dataset):
         self.info = DataSetInfo(dataset_type=dataset_type, **kwargs)
 
         if load_dataset and os.path.exists(pjoin(dataset_dir, dataset_fname)):
-            print(f"Loading existing dataset: {os.path.abspath(pjoin(dataset_dir, dataset_fname))}")
+            rank_zero_info(f"Loading existing dataset: {os.path.abspath(pjoin(dataset_dir, dataset_fname))}")
             self.load_dataset(data_slice=data_slice)
         else:
             if not os.path.exists(pjoin(dataset_dir, dataset_fname)):
-                print(f"Dataset file not found: {os.path.abspath(pjoin(dataset_dir, dataset_fname))}")
-            print(f"Creating new dataset: {os.path.abspath(pjoin(dataset_dir, dataset_fname))}")
+                rank_zero_info(f"Dataset file not found: {os.path.abspath(pjoin(dataset_dir, dataset_fname))}")
+            rank_zero_info(f"Creating new dataset: {os.path.abspath(pjoin(dataset_dir, dataset_fname))}")
             self.process()
         
         if not self.onlySave:
@@ -240,7 +243,7 @@ class ManyBodyData(Dataset):
                 assert self.data is not None, "Data is not loaded or processed"
         else:
             self.data = []
-            print(f"Only saving dataset")
+            rank_zero_info(f"Only saving dataset")
             
         self.info.show_info()
 
@@ -263,7 +266,7 @@ class ManyBodyData(Dataset):
                 Default: False. This is used for large dataset that cannot be loaded into memory at once.'''
         assert os.path.exists(existing_dataset_fname), f"{existing_dataset_fname} does not exist"
         dataset_dir, dataset_fname = os.path.dirname(existing_dataset_fname), os.path.basename(existing_dataset_fname)
-        print('Loading dataset info')
+        rank_zero_info('Loading dataset info')
         info_dict = {}
         with h5.File(existing_dataset_fname, 'r') as f:
             for key, value in f['info'].items():
@@ -291,7 +294,7 @@ class ManyBodyData(Dataset):
         """
 
         with h5.File(pjoin(self.dataset_dir, self.dataset_fname), 'r') as f:
-            print("updating info from existing dataset")
+            rank_zero_info("updating info from existing dataset")
             for key, value in f['info'].items():
                 if key == 'dataset_type':
                     assert self.info.dataset_type == value[()].decode('utf-8'), f"Dataset type mismatch: set {self.info.dataset_type}, get {value[()].decode('utf-8')}"
@@ -300,7 +303,7 @@ class ManyBodyData(Dataset):
                 self.info.__dict__[key] = value[()]
 
         self.info.mat_id = self.info.mat_id[data_slice] if data_slice is not None else self.info.mat_id
-        print("loading data")
+        rank_zero_info("loading data")
         if not self.lazy_load:
             self.data = [self.datapoint_interface_h5(pjoin(self.dataset_dir, self.dataset_fname), mat_id, mode='r', load_large_dataset_inference=self.load_large_dataset_inference) for mat_id in self.info.mat_id]
         else:
@@ -386,7 +389,7 @@ class ManyBodyData(Dataset):
                 raise Exception(f"Dataset type {dataset_type} is not supported")
             
         assert len(folder_list) > 0, f"No data found under {flows_dir}"
-        print(f"Found {len(folder_list)} out of {len(flows_status)} materials for {dataset_type}")
+        rank_zero_info(f"Found {len(folder_list)} out of {len(flows_status)} materials for {dataset_type}")
 
         folder_list = sorted(folder_list)
 
@@ -409,14 +412,14 @@ class ManyBodyData(Dataset):
                 # put info dict into h5 file
                 f.create_group('info')
                 for key, value in info.__dict__.items():
-                    # print('--debug:', key, value)
+                    # rank_zero_info(f"--debug: {key}, {value}")
                     if value is None:
                         value = np.nan
                     f['info'].create_dataset(key, data=value)
-                print(f"[Series]: creating dataset file: {os.path.abspath(f.filename)}")
+                rank_zero_info(f"[Series]: creating dataset file: {os.path.abspath(f.filename)}")
 
         else:
-            print(f"[Pool]: creating dataset files for {len(info.mat_id)} material")
+            rank_zero_info(f"[Pool]: creating dataset files for {len(info.mat_id)} material")
             mat_id_list = list(map(lambda x: x.decode('utf-8'), info.mat_id))
             for mat_id in mat_id_list:
                 with h5.File(pjoin(dataset_dir, mat_id+dataset_fname), 'w') as f:

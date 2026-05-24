@@ -14,7 +14,7 @@ WFN:  # wfn shape (nk, nb, H, W, [2]): H - height, W - width, last 2: re/im for 
   nv_wfn: 2  # number of valence bands in wfn
   nc_wfn: 6  # number of conduction badns in wfn
 
-GW:
+GW:  # WFN params are inherited from WFN section (ignoring nc/nv_wfn)
   nv_sigma: 1  # number of valence badns in GW
   nc_sigma: 1  # number of conduction bands in GW
   prediction_only: False

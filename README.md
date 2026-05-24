@@ -149,7 +149,7 @@ Train an **Equivariant Variational Autoencoder (E2-VAE)** to embed Kohn-Sham wav
 
 - Trained model saved as: `./results/vae_e2_wfn.save`
 
-VAE Training now supports Distributed Data Parallel (DDP) training via pytorch_lightning on multiple GPUs. See documentation for details.
+VAE Training now supports Distributed Data Parallel (DDP) training via pytorch_lightning on multiple GPUs. See documentation `deep_gwbse/README.md` for details.
 
 ---
 
