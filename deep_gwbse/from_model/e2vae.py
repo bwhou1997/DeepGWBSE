@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 from .model_util import print_model_size, capture_config
 import os
 from tqdm import tqdm
+from pytorch_lightning.utilities import rank_zero_only
 
 class single_e2CNN_module(nn.Module):
     """
@@ -199,6 +200,8 @@ class EquivariantEncoder_double_cnn(nn.Module):
         self.logvar_cnn_stack = nn.ModuleList(self.logvar_cnn_stack)
 
         self.summary()
+    
+    @rank_zero_only
     def summary(self):
         print('==================== Encoder Summary ====================')
         print(f'Encoder hidden {len(self.hidden_cnn_channels)} layers:', [f"{self.input_channels}->"]+self.hidden_cnn_channels[:-1]+[f"->{self.hidden_cnn_channels[-1]}"])
@@ -260,6 +263,7 @@ class EquivariantDecoder(nn.Module):
 
         self.summary()
 
+    @rank_zero_only
     def summary(self):
         print('==================== Decoder Summary ====================')
         print(f'Decoder hidden {len(self.hidden_cnn_channels)} layers:', [f"{self.input_channels}->"]+self.hidden_cnn_channels[:-1]+[f"->{self.hidden_cnn_channels[-1]}"])
@@ -318,6 +322,7 @@ class EquivariantVAE(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std 
 
+    @rank_zero_only
     def summary(self):
         # Print model parameters
         print('==================== VAE Summary ====================')
@@ -407,6 +412,10 @@ def vae_loss(recon_x, x, mu, logvar, beta=0.02):
     recon_loss = mse_loss(recon_x, x)
     kl_loss = -beta * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
     return recon_loss + kl_loss
+
+
+def kl_loss_mean(mu, logvar):
+    return -torch.mean(1 + logvar - mu.pow(2) - logvar.exp())
 
 
 

@@ -505,7 +505,7 @@ class wfn(BGWIO):
         
         """
 
-        print('debug: get_dataset with nc=%d, nv=%d, cell_slab_truncation=%s, useWignerXY=%s, useWignerXYZ=%s' % (nc, nv, str(cell_slab_truncation), str(useWignerXY), str(useWignerXYZ)))
+        # print('debug: get_dataset with nc=%d, nv=%d, cell_slab_truncation=%s, useWignerXY=%s, useWignerXYZ=%s' % (nc, nv, str(cell_slab_truncation), str(useWignerXY), str(useWignerXYZ)))
 
         if operator == 'dipole':
             dipole = self.get_dipole(nc=nc, nv=nv)

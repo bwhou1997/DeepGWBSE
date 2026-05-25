@@ -1,0 +1,7 @@
+orig_dataset_dir: Deep-GWBSE/src/from_model/dataset/dataset_WFN.h5  # path of the datset to be embedded
+model_config_dir: Deep-GWBSE/src/config/e2vae.yaml  # config file used to train the model. It is reccommended to use the same config file of training.
+ckpt_dir: ./best_epoch.ckpt  # ckpt from lightning
+device: cpu  # cpu / cuda (synonoym: gpu)
+save_dataset_dir: ./
+save_dataset_fname: latent.h5
+lazy_load: True  # True to use lazy load for original dataset (slower but saves memory)

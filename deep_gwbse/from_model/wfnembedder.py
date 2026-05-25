@@ -14,6 +14,9 @@ from deep_gwbse.from_model.vaetrainer import wfn_collate_fn, WFNVAETrainer, wfn_
 from deep_gwbse.from_model.e2vae import EquivariantVAE
 from deep_gwbse.from_model.e3vae import EquivariantVAE3D
 from deep_gwbse.from_model.trainer import Trainer
+import yaml
+from functools import partial
+from deep_gwbse.from_model.vaetrainer_ddp import init_collate_real, init_model_real, init_input_channels_real
 
 # class ManyBodyData_WFN_Embedder_pretrained:
 #     """
@@ -91,7 +94,8 @@ class ManyBodyData_WFN_Embedder_pretrained:
         self.latent_embedder = latent_embedder(latent_dim, **kwargs)
         self.del_wfn_original = False
         self.on_cuda = False
-        if hasattr(self.latent_embedder, 'vaetrainer'):
+        if hasattr(self.latent_embedder, 'vaetrainer') or\
+            (hasattr(self.latent_embedder, "on_cuda") and self.latent_embedder.on_cuda):
             self.on_cuda = True
     
     def _embed_wfn(self, wfn_data):
@@ -335,6 +339,50 @@ class OtherEmbedder(LatentEmbedderBASE):
         pass
     def embed(self, wfn_data: np.ndarray) -> np.ndarray:
         pass
+
+
+class LightningEmbedder_realVAE(LatentEmbedderBASE):
+    def __init__(self, latent_dim, input_channels, config_dir, ckpt_dir, device="cpu"):
+        self.on_cuda = (device in ["cuda", "gpu"])
+        if device == "gpu":
+            device = "cuda"
+        self.device=device
+        with open(config_dir, 'r') as f:
+            config = yaml.safe_load(f)
+        self.input_channels = input_channels
+        self.collate_fn = init_collate_real(config)
+        self.vae = init_model_real(config, self.input_channels,)
+
+        # load ckpt
+        ckpt = torch.load(ckpt_dir)
+        model_weights = ckpt["state_dict"]
+        for key in list(model_weights):
+            model_weights[key.replace("model.", "")] = model_weights.pop(key)
+        self.vae.load_state_dict(model_weights)
+        self.vae.to(device=self.device)
+        self.vae.eval()
+
+        # stats
+        self._recon_loss = 0.
+        self._n_wfn = 0.
+
+    @torch.no_grad()
+    def embed(self, wfn_data: np.ndarray) -> np.ndarray:
+        # evaluate
+        nk, nb = wfn_data.shape[:2]
+        wfn_data = wfn_data.reshape((nk*nb,) + wfn_data.shape[2:])
+        wfn_data, mask = self.collate_fn([wfn_data])
+        wfn_data = wfn_data.to(self.device)
+        x_recon, mu, logvar = self.vae(wfn_data)
+        
+        # GOP layer
+        pool_dim = tuple(range(2, len(mu.shape)))
+        mu = mu.mean(dim=pool_dim)
+        mu = mu / mu.sum(dim=1, keepdim=True)
+        mu = mu.detach().cpu().numpy()
+
+        return mu.reshape(nk, nb, -1) # (nk, nb, latent_dim)
+ 
 
 
 

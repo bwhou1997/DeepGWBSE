@@ -18,7 +18,6 @@ from torch.utils.data import DataLoader
 from deep_gwbse.from_model.data import ManyBodyData
 from sklearn.metrics import r2_score
 
-torch.backends.cudnn.enabled = False
 class WFNVAETrainer(Trainer):
     """
     For options in `kwargs`, see the `__init__` function of `Trainer`.
@@ -79,13 +78,19 @@ class WFNVAETrainer(Trainer):
 
 # wfdata = ManyBodyData.from_existing_dataset('./dataset/dataset_semi.h5')
 
-def wfn_collate_fn(batch):
+def wfn_collate_fn(batch, batched_data=False):
+    '''batched_data: compatible with vaetrainer_ddp'''
     assert len(batch)==1, "Batch size should be 1 for WFN data"
-    wfn = batch[0]["wfn"]
-    nk, nb, X, Y, C = wfn.shape
-    # Rearrange dimensions to make the z-coordinate the channel dimension,
-    # treating each material as a batch due to varying wave function sizes.
-    wfn = (wfn.reshape(nk*nb, X, Y, C)).transpose(0, 3, 1, 2)
+    if not batched_data:
+        wfn = batch[0]["wfn"]
+        nk, nb, X, Y, C = wfn.shape
+        # Rearrange dimensions to make the z-coordinate the channel dimension,
+        # treating each material as a batch due to varying wave function sizes.
+        wfn = (wfn.reshape(nk*nb, X, Y, C)).transpose(0, 3, 1, 2)
+    else:
+        wfn = batch[0]
+        N, X, Y, C = wfn.shape
+        wfn = wfn.transpose(0, 3, 1, 2)
     wfn = torch.from_numpy(wfn).float()
     scaling_factor = 4 # TODO: make the process determining the scaling factor automatic
     delta_X = scaling_factor * math.ceil(X / scaling_factor) - X
@@ -101,12 +106,17 @@ def wfn_collate_fn(batch):
 
     return wfn, mask
 
-def wfn_3d_wigner_collate_fn(batch):
+def wfn_3d_wigner_collate_fn(batch, batched_data=False):
     assert len(batch)==1, "Batch size should be 1 for WFN data (each material is treated as a batch)"
-    wfn3d = batch[0]["wfn"]
-    nk, nb, X, Y, Z = wfn3d.shape
+    if not batched_data:
+        wfn3d = batch[0]["wfn"]
+        nk, nb, X, Y, Z = wfn3d.shape
+        wfn = wfn3d.reshape(nk*nb, 1, X, Y, Z) # channel dimension is 1 for 3D wave function data
+    else:
+        wfn = batch[0]
+        N, X, Y, Z = wfn.shape
+        wfn = wfn[:, None, :, :, :]
 
-    wfn = wfn3d.reshape(nk*nb, 1, X, Y, Z) # channel dimension is 1 for 3D wave function data
     wfn = torch.from_numpy(wfn).float()
     scaling_factor = 8 # TODO: make the process determining the scaling factor automatic
     delta_X = scaling_factor * math.ceil(X / scaling_factor) - X
@@ -169,6 +179,7 @@ if __name__ == "__main__":
 
     ########################################################################################################
     ### 3d bulk vae
+    torch.backends.cudnn.enabled = False
     config_model_path_3d = "./vae_e3_wfn.save"
     num_epoches_3d = 1000
     beta_3d = 0.0

@@ -8,9 +8,21 @@ Contributors: Xian Xu, Chengyan Zhang, Jinyuan Wu
 
 ## Outline
 - [Deep-GWBSE](#deep-gwbse)
+  - [Outline](#outline)
   - [Features](#features)
   - [Installation](#installation)
+    - [Prerequisites: First-principles software packages](#prerequisites-first-principles-software-packages)
+    - [Deep-GWBSE Package Dependency/Installation](#deep-gwbse-package-dependencyinstallation)
+      - [Option 1: Using `uv`](#option-1-using-uv)
+      - [Option 2: Using `pip` (Package installation)](#option-2-using-pip-package-installation)
   - [Quick Start](#quick-start)
+    - [1. General Pipeline:](#1-general-pipeline)
+    - [2. DFT-GW-BSE Workflow Scripts](#2-dft-gw-bse-workflow-scripts)
+    - [3. MBFormer Training Scripts](#3-mbformer-training-scripts)
+      - [Part 1: Data Preprocessing](#part-1-data-preprocessing)
+      - [Part 2: VAE Training](#part-2-vae-training)
+      - [Part 3: GW Training](#part-3-gw-training)
+      - [Part 4: BSE Training](#part-4-bse-training)
   - [Repo Structure](#repo-structure)
   - [Documentation](#documentation)
   - [License](#license)
@@ -136,6 +148,8 @@ Train an **Equivariant Variational Autoencoder (E2-VAE)** to embed Kohn-Sham wav
 **Output:**
 
 - Trained model saved as: `./results/vae_e2_wfn.save`
+
+VAE Training now supports Distributed Data Parallel (DDP) training via pytorch_lightning on multiple GPUs. See documentation `deep_gwbse/README.md` for details.
 
 ---
 

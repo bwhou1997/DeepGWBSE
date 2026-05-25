@@ -8,6 +8,7 @@ import random
 import numpy as np
 import os
 
+from pytorch_lightning.utilities import rank_zero_only
 
 class single_e3CNN_module(nn.Module):
 
@@ -266,6 +267,7 @@ class EquivariantEncoder3D_double_cnn(nn.Module):
 
         self.summary()
 
+    @rank_zero_only
     def summary(self):
 
         print('==================== Encoder3D Summary ====================')
@@ -351,6 +353,7 @@ class EquivariantDecoder3D(nn.Module):
 
         self.summary()
 
+    @rank_zero_only
     def summary(self):
 
         print('==================== Decoder3D Summary ====================')
@@ -419,6 +422,7 @@ class EquivariantVAE3D(nn.Module):
         eps = torch.randn_like(std)
         return mu + eps * std
 
+    @rank_zero_only
     def summary(self):
         # Print model parameters
         print('==================== VAE3D Summary ====================')
